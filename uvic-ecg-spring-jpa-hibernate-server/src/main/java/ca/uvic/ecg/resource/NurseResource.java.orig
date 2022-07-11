@@ -1,0 +1,271 @@
+package com.techprimers.jpa.spring.uvic.ecg.resource;
+
+import com.mkingzhu.dataprotocol.Entity;
+import com.mkingzhu.dataprotocol.Feed;
+import RestModel;
+
+
+import com.techprimers.jpa.spring.uvic.ecg.repository.*;
+import ErrorInfo;
+import Devices;
+import Nurse;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.text.SimpleDateFormat;
+import java.util.*;
+
+@RestController
+@RequestMapping("/v1/{clinic}")
+public class NurseResource {
+    @Autowired
+    NurseRepository nurseRepository;
+    @Autowired
+    DevicesRepository deviRepo;
+    @Autowired
+    RemarksRepository remarkRepo;
+    @Autowired
+    ClinicRepository clinicRepo;
+    @Autowired
+    AppointmentRecordRepository appRepo;
+
+    private ErrorInfo errorInfo;
+    private HttpStatus http;
+    private String dateFormat = "yyyy-MM-dd'T'HH:mm:ssz";
+
+    //Get info of all the nurses  (Tested)
+    @GetMapping("/getnurses")
+    public ResponseEntity<RestModel> getAll(@PathVariable("clinic") String clinicName) {
+        Feed<Nurse> feed = new Feed<>();
+        do {
+            try {
+                if (nurseRepository.findAll().isEmpty()) {
+                    errorInfo = ErrorInfo.NoData;
+                    http = HttpStatus.BAD_REQUEST;
+                    break;
+                }
+                List<Entity<Nurse>> entities = new LinkedList<>();
+                List<Nurse> nurses = nurseRepository.findByClinicId(clinicRepo.findByClinicName(clinicName).getClinicId());
+                for (Nurse nurse : nurses) {
+                    if (!verifyClinicId(clinicName, nurse.getClinicId())) {
+                        break;
+                    }
+                    Entity<Nurse> entity = new Entity<>();
+                    entity.setModel(nurse);
+                    entities.add(entity);
+                }
+                feed.setEntities(entities);
+                errorInfo = ErrorInfo.OK;
+                http = HttpStatus.OK;
+            } catch (Exception e) {
+                errorInfo = ErrorInfo.UnKnown;
+                http = HttpStatus.BAD_REQUEST;
+            }
+        } while (false);
+        return new ResponseEntity<>(new RestModel<>(feed, errorInfo), http);
+    }
+
+    //Register with input of one Nurse (Tested)
+    //Todo: register() will create new properties in db which will cause future problems
+    @PostMapping("/nurses")
+    public ResponseEntity<RestModel> register(@PathVariable("clinic") String clinicName, @RequestBody Nurse user) {
+        do {
+            try {
+                if (nurseRepository.findByNurseEmail(user.getNurseEmail()) != null) {
+                    errorInfo = ErrorInfo.DUPLICATE_USER;
+                    http = HttpStatus.BAD_REQUEST;
+                    break;
+                }
+                if (!verifyClinicId(clinicName, user.getClinicId())) {
+                    break;
+                }
+                nurseRepository.save(user);
+                errorInfo = ErrorInfo.OK;
+                http = HttpStatus.OK;
+            } catch (Exception e) {
+                errorInfo = ErrorInfo.UnKnown;
+                http = HttpStatus.BAD_REQUEST;
+            }
+        } while (false);
+
+        return new ResponseEntity<>(new RestModel<>(errorInfo), http);
+    }
+
+    //TODO:test
+    @GetMapping("/device/{device-id}")
+    public ResponseEntity<RestModel> GetOneDevice(
+            @PathVariable("clinic") String clinicName,
+            @PathVariable("device-id") Integer Did) {
+        Entity<Devices> entity = new Entity<>();
+        do {
+            try {
+                if (deviRepo.findByDeviceId(Did) == null) {
+                    errorInfo = ErrorInfo.NoData;
+                    http = HttpStatus.BAD_REQUEST;
+                    break;
+                }
+                if (!verifyClinicId(clinicName, deviRepo.findByDeviceId(Did).getClinicId())) {
+                    break;
+                }
+                entity.setModel(deviRepo.findByDeviceId(Did));
+                errorInfo = ErrorInfo.OK;
+                http = HttpStatus.OK;
+            } catch (Exception e) {
+                errorInfo = ErrorInfo.UnKnown;
+                http = HttpStatus.BAD_REQUEST;
+            }
+        } while (false);
+        return new ResponseEntity<>(new RestModel<>(entity, errorInfo), http);
+    }
+
+    //Get All the Device information by selecting the device_id TODO: test
+    @GetMapping("/Alldevice")
+    public ResponseEntity<RestModel> GetAllDevices(@PathVariable("clinic") String clinicName) {
+        Feed<Devices> feed = new Feed<>();
+        do {
+            try {
+                if (deviRepo.findAll().isEmpty()) {
+                    errorInfo = ErrorInfo.NoData;
+                    http = HttpStatus.BAD_REQUEST;
+                    break;
+                }
+
+                List<Entity<Devices>> entities = new LinkedList<>();
+                List<Devices> device = deviRepo.findAll();
+                for (Devices device : device) {
+                    if (!verifyClinicId(clinicName, device.getClinicId())) {
+                        break;
+                    }
+                    Entity<Devices> entity = new Entity<>();
+                    entity.setModel(device);
+                    entities.add(entity);
+                }
+                feed.setEntities(entities);
+                errorInfo = ErrorInfo.OK;
+                http = HttpStatus.OK;
+            } catch (Exception e) {
+                errorInfo = ErrorInfo.UnKnown;
+                http = HttpStatus.BAD_REQUEST;
+            }
+        } while (false);
+        return new ResponseEntity<>(new RestModel<>(feed, errorInfo), http);
+    }
+
+    @GetMapping("/device")
+    public ResponseEntity<RestModel> GetAllAvailableDevices(@PathVariable("clinic") String clinicName,
+                                                            @RequestParam("pickupDate") String pickupDate,
+                                                            @RequestParam("deviceReturnDate") String deviceReturnDate,
+                                                            @RequestParam("deviceLocation") String deviceLoc
+    ) {
+        Feed<Devices> feed = new Feed<>();
+        do {
+            try {
+                //parsing string to Date to Calendar.
+                SimpleDateFormat df1 = new SimpleDateFormat(dateFormat);
+                TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
+                Calendar pickUpC = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+                Calendar returnC = Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+                df1.setTimeZone(TimeZone.getTimeZone("UTC"));
+                Date pickUpd = df1.parse(pickupDate);
+                Date returnDate = df1.parse(deviceReturnDate);
+                pickUpC.setTime(pickUpd);
+                returnC.setTime(returnDate);
+                if (clinicRepo.findByClinicName(clinicName) == null) {
+                    errorInfo = ErrorInfo.WrongClinicName;
+                    http = HttpStatus.BAD_REQUEST;
+                    break;
+                }
+                Integer clinicId = clinicRepo.findByClinicName(clinicName).getClinicId();
+                //Avoid NullpointerException
+                if (deviRepo.findByClinicId(clinicId).isEmpty()) {
+                    errorInfo = ErrorInfo.NoData;
+                    http = HttpStatus.BAD_REQUEST;
+                    break;
+                }
+                List<Entity<Devices>> entities = new LinkedList<>();
+                List<Devices> device = deviRepo.findByClinicId(clinicId);
+
+                //Using iterator to avoid ConcurrentModificationException;
+                Iterator<Devices> iterator = device.iterator();
+                while (iterator.hasNext()) {
+                    Devices device = iterator.next();
+                    if (!appRepo.findByDeviceId(device.getDeviceId()).isEmpty()) {
+                        if (!appRepo.findByPickupDateAfterAndDeviceReturnDateBeforeAndDeviceId(pickUpC, returnC, device.getDeviceId()).isEmpty()) {
+                            iterator.remove();
+                        }
+                    }
+                }
+                for (Devices device : device) {
+                    if (!verifyClinicId(clinicName, device.getClinicId())) {
+                        break;
+                    }
+                    if (device.getDeviceLocation().equals(deviceLoc)) {
+                        Entity<Devices> entity = new Entity<>();
+                        entity.setModel(device);
+                        entities.add(entity);
+                    }
+                }
+                feed.setEntities(entities);
+                errorInfo = ErrorInfo.OK;
+                http = HttpStatus.OK;
+            } catch (Exception e) {
+                errorInfo = ErrorInfo.UnKnown;
+                http = HttpStatus.BAD_REQUEST;
+            }
+        } while (false);
+        return new ResponseEntity<>(new RestModel<>(feed, errorInfo), http);
+    }
+
+<<<<<<< HEAD
+    //TODO: Test
+=======
+>>>>>>> resolved
+    @PostMapping("/addDevices")
+    public ResponseEntity<RestModel> AddNewDevice(@PathVariable("clinic") String clinicName,
+                                                  @RequestBody Devices newDevice) {
+        do {
+            try {
+                if (deviRepo.findByDeviceName(newDevice.getDeviceName()) != null) {
+                    errorInfo = ErrorInfo.DUPLICATE_Device;
+                    http = HttpStatus.BAD_REQUEST;
+                    break;
+                }
+                if (!verifyClinicId(clinicName, newDevice.getClinicId())) {
+                    break;
+                }
+                deviRepo.save(newDevice);
+                errorInfo = ErrorInfo.OK;
+                http = HttpStatus.OK;
+            } catch (Exception e) {
+                errorInfo = ErrorInfo.UnKnown;
+                http = HttpStatus.BAD_REQUEST;
+            }
+        } while (false);
+        return new ResponseEntity<>(new RestModel<>(errorInfo), http);
+    }
+
+    //Logout TODO: return Json
+    @GetMapping("/logout")
+    public String logout(@PathVariable("clinic") int clinicId){
+        //TODO: erase the Token
+        SecurityContextHolder.clearContext();
+        return "Logged out successfully";
+    }
+
+    //Verify the ClinicId TODO: verify the nurse is in the clinic or not
+    public boolean verifyClinicId(String clinicName, Integer cid) {
+        if (clinicRepo.findByClinicName(clinicName) == null) {
+            this.errorInfo = ErrorInfo.InvalidCliniId;
+            this.http = HttpStatus.BAD_REQUEST;
+            return false;
+        }
+        if (clinicRepo.findByClinicName(clinicName).getClinicId() != cid) {
+            this.errorInfo = ErrorInfo.ConflictClinicId;
+            this.http = HttpStatus.BAD_REQUEST;
+            return false;
+        }
+        return true;
+    }
+}
